@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.github/
+.pytest_cache/
+logs/
+data/*.db
+documents/*.pdf
+checkpoints.db
+.env
+历史版本文件/
+tests/
+docs/
+*.md
