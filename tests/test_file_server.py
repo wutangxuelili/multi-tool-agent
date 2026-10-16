@@ -39,21 +39,42 @@ def test_reads_nested_file_inside_whitelist(sandbox):
     assert file_server.read_file("sub/nested.txt") == "NESTED-OK"
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "../documents_evil/secret.txt",  # 共享前缀的兄弟目录（旧实现的漏网之鱼）
-        "..\\documents_evil\\secret.txt",  # 同上，Windows 分隔符
-        "../outside.txt",  # 纯上级目录
-        "..",
-        "../",
-        "sub/../../documents_evil/secret.txt",  # 绕一圈再出去
-    ],
-)
+# 平台无关的越界路径：在任何系统上都必须是"不允许访问"
+TRAVERSAL_PATHS = [
+    "../documents_evil/secret.txt",  # 共享前缀的兄弟目录（旧实现的漏网之鱼）
+    "../outside.txt",  # 纯上级目录
+    "..",
+    "../",
+    "sub/../../documents_evil/secret.txt",  # 绕一圈再出去
+]
+
+
+@pytest.mark.parametrize("path", TRAVERSAL_PATHS)
 def test_blocks_traversal_outside_whitelist(sandbox, path):
     result = file_server.read_file(path)
     assert "不允许访问" in result, f"{path} 不应被放行，实际返回：{result}"
     assert "SECRET" not in result
+
+
+@pytest.mark.skipif(os.name != "nt", reason="反斜杠只在 Windows 上算路径分隔符")
+@pytest.mark.parametrize("path", ["..\\documents_evil\\secret.txt"])
+def test_blocks_windows_style_traversal(sandbox, path):
+    """Windows 上 `..\\` 同样是穿越，必须拒绝。"""
+    result = file_server.read_file(path)
+    assert "不允许访问" in result, f"{path} 不应被放行，实际返回：{result}"
+    assert "SECRET" not in result
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX 上反斜杠是普通文件名的一部分")
+def test_backslash_is_a_plain_filename_on_posix(sandbox):
+    """POSIX 语义说明：`..\\documents_evil\\x` 不是穿越，而是白名单目录内的一个文件名。
+
+    它既不会越界、也不会泄露内容（文件不存在）。
+    这正是当初 CI 在 Ubuntu 上失败的原因——测试把 Windows 语义当成了通用语义。
+    """
+    result = file_server.read_file("..\\documents_evil\\secret.txt")
+    assert "SECRET" not in result
+    assert "不允许访问" in result or "文件不存在" in result
 
 
 def test_blocks_absolute_path(sandbox):
