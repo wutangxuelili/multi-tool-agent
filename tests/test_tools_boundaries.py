@@ -11,6 +11,7 @@
 import asyncio
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from internal_api import server as api_server
@@ -89,7 +90,17 @@ def test_internal_api_base_url_is_read_at_call_time(monkeypatch):
 
 
 def test_internal_api_reports_connection_error(monkeypatch):
-    monkeypatch.setenv("INTERNAL_API_BASE", "http://127.0.0.1:1")  # 必然连不上
+    """连不上内部 API 时给出可操作提示。
+
+    这里**打桩抛异常**而不是真去连 `127.0.0.1:1`：真实网络行为在不同环境里
+    可能是"立刻拒绝"（ConnectionError）也可能是"卡到超时"（ConnectTimeout），
+    后者会让测试变成环境相关的 flaky 用例。
+    """
+
+    def _refused(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("connection refused")
+
+    monkeypatch.setattr(internal_api.requests, "get", _refused)
     result = internal_api.list_announcements.invoke({"limit": 1})
     assert "无法连接内部 API" in result
 

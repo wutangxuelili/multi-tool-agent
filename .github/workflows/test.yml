@@ -62,10 +62,17 @@ jobs:
         run: python scripts/init_db.py
 
       # 测试不需要 .env / API Key：LLM 在节点里惰性创建，测试注入脚本化假 LLM
-      - name: Run tests with coverage gate
-        if: matrix.python-version == '3.11'
-        run: pytest -q --cov --cov-fail-under=70
-
       - name: Run tests
-        if: matrix.python-version != '3.11'
-        run: pytest -q
+        run: |
+          set +e
+          if [ "${{ matrix.python-version }}" = "3.11" ]; then
+            python -m pytest -q --tb=line --cov --cov-fail-under=70 2>&1 | tee pytest.log
+          else
+            python -m pytest -q --tb=line 2>&1 | tee pytest.log
+          fi
+          status=${PIPESTATUS[0]}
+          # 把失败用例变成 GitHub 注解：不用登录也能在 API 里看到失败原因
+          grep -E "^(FAILED|ERROR)" pytest.log | head -20 | while IFS= read -r line; do
+            echo "::error title=pytest::$line"
+          done
+          exit $status
