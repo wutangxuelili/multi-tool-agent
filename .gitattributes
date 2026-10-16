@@ -1,0 +1,18 @@
+# 统一换行符：仓库内所有文本文件按 LF 存储，避免"整文件 diff"式的假改动
+* text=auto eol=lf
+
+# 二进制文件不要做换行转换
+*.db binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.xlsx binary
+*.woff binary
+*.woff2 binary
+
+# Windows 专用脚本保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
