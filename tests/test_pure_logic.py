@@ -8,9 +8,21 @@ from agent.state import State
 
 
 def test_state_has_required_keys():
-    """State 的 TypedDict 应包含三个字段。"""
+    """State 的 TypedDict 应包含两个字段（needs_calc 是已被删除的死字段）。"""
     keys = set(State.__annotations__.keys())
-    assert keys == {"messages", "pending_tool", "needs_calc"}
+    assert keys == {"messages", "pending_tool"}
+
+
+def test_state_messages_has_a_reducer():
+    """messages 必须挂 add_messages reducer（回归：缺 reducer 会丢多轮历史）。
+
+    没有 reducer 时，`invoke()` 的新输入会把 checkpoint 里的历史整字段覆盖掉，
+    第二次 run_agent() 就看不到第一轮对话了。
+    """
+    annotation = State.__annotations__["messages"]
+    assert getattr(annotation, "__metadata__", None), (
+        "State.messages 需要写成 Annotated[list[AnyMessage], add_messages]"
+    )
 
 
 def test_prompts_are_non_empty_strings():
