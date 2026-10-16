@@ -1,12 +1,16 @@
 # Agent 设计模式笔记（multi-tool-agent）
 
+> **关于文中的"20 任务实测"数据**：它们来自 2026-10-08 的一次性评测脚手架（`run_20_tasks.py`），
+> 该脚手架与结果报告**已从仓库移除**（不属于可维护的回归测试）。因此这些数字只是**历史记录、不再可复现**，
+> 请当作"当时观察到的问题"来读，而不是当前能力的度量。可复现的行为断言都在 `tests/` 里。
+
 ## 如何使用这份笔记
 
 **什么时候翻它：**
 
 - **要设计一个新 Agent 时**——先看「职责分离」「状态机编排」「Human-in-the-loop」三节，判断你的场景要不要拆节点、要不要上 LangGraph。
 - **要给 Agent 加一个新工具时**——看「统一 tool 层」和「工具桥接」，注意 `INFO_TOOL_NAMES` 那份手写清单要同步。
-- **要改 `agent/graph.py` 或 `agent/nodes.py` 之前**——对照「状态机编排」里的坑（`messages` 没有 reducer、`needs_calc` 是死字段），避免重复踩。
+- **要改 `agent/graph.py` 或 `agent/nodes.py` 之前**——对照「状态机编排」里的坑（`messages` 必须挂 reducer、路由要看用户提问而不是 AI 自述），避免重复踩。
 - **代码 review / 看别人的 Agent 项目时**——把这 8 条当 checklist，逐条问"他这里是怎么处理的"。
 
 **它的局限性：**
@@ -40,7 +44,7 @@ v1 对照：v1 把这套循环完全交给了 `AgentExecutor` + prompt 里的 `{
 
 **取舍**
 
-- 代价：messages 拼接、轮数上限、工具结果回填全部要自己维护；`State.messages` 是普通 `list`（没有 `add_messages` reducer），所以节点必须**返回完整列表**，写错就丢历史。
+- 代价：轮数上限、工具结果回填要自己维护。`State.messages` 挂了 `add_messages` reducer 之后，节点只返回**本轮新增**的消息即可；早期版本没有 reducer，节点必须返回完整列表，写错就丢历史（这正是本项目踩过的坑，见 §"状态定义"）。
 - 用满 5 轮会**静默截断**，用户看不到"我还没查完"，只看到半截答案。
 - **什么时候不该用**：流程固定的场景（比如"先查库存再下单"）直接写死顺序更便宜也更可控；ReAct 的灵活性是用 token 和不确定性换来的。
 
@@ -87,20 +91,24 @@ LLM 决定执行**不可逆操作**（删数据、发消息、付款）时，需
 `agent/nodes.py` + `agent/graph.py` + `main.py` 三处配合。核心是命中敏感名单就**只记录不执行**：
 
 ```python
-SENSITIVE_TOOLS = {"delete_employee"}
+# tools/__init__.py —— 敏感工具登记表（唯一事实来源）
+SENSITIVE_TOOL_NAMES = frozenset({"delete_employee"})
 ...
-if tool_name in SENSITIVE_TOOLS:
+# agent/nodes.py
+if is_sensitive_tool(tool_name):
     pending = tool_call
     continue              # 不执行，交给 confirm_node
 ```
+
+闸门是**两道**：`info_node` 只记录不执行；执行层 `_execute_tool` 默认拒绝敏感工具，只有 `confirm_node` 能以 `allow_sensitive=True` 调用。因此"换个节点调用敏感工具"这条路也走不通。
 
 然后 `route_after_info` 看到 `pending_tool` 就转到 `confirm_node`，由 `interrupt(...)` 挂起；`main.py` 把 `__interrupt__` 翻译成 `[NEED_CONFIRM]` 前缀返回给调用方，用户回复后用 `Command(resume=answer)` 恢复。
 
 **取舍**
 
-- **决定权在代码不在 prompt**——这是优点，也是代价：新增一个敏感工具必须改 `SENSITIVE_TOOLS` 这个常量，改了要重新部署。
-- 要求调用方**复用同一条 `thread_id`**，否则找不到中断现场（我在测试中踩过这个坑）。这是隐式契约，API 签名上看不出来。
-- 目前只判断 `answer == "yes"`：**没有超时、没有审计日志、没有权限分级**。生产环境至少还要补"谁来确认"和"确认记录留痕"。
+- **决定权在代码不在 prompt**——这是优点，也是代价：新增一个敏感工具必须登记到 `SENSITIVE_TOOL_NAMES`（`tests/test_sensitive_gate.py` 会守住这件事），改了要重新部署。
+- 要求调用方**复用同一条 `thread_id`**，否则找不到中断现场（我在测试中踩过这个坑）。为此 `run_agent(..., thread_id)` 现在是**必填参数**，`resume_agent` 也会先校验该线程上确实有等待确认的操作，避免"静默重跑一轮"。
+- 答复只做二值判断（同意/拒绝，已归一化大小写与中英文），**没有超时、没有权限分级、没有"谁来确认"的身份校验**。审计已在做：每次批准/拒绝追加一行到 `logs/sensitive_ops.jsonl`。
 - **什么时候不该用**：高频只读操作（每次查询都要人点一下，人就成了瓶颈）。确认要留给"不可逆 + 低频 + 影响面大"的操作。
 
 **实测效果**
@@ -127,8 +135,8 @@ graph.add_edge("calc", "writer")
 
 **取舍**
 
-- **状态定义有坑**：`agent/state.py` 的 `State` 是 `TypedDict`，`messages: list` **没有 reducer**，所以每个节点都返回 `state["messages"] + 新增`，一不小心写成覆盖就丢历史。
-- **`State.needs_calc` 是死字段**：声明了、注释写了"由 info_agent 设置"，但全项目**从未被读写**。实际判断改用了 `CALC_KEYWORDS` 字符串匹配，这正是 `calc` 支线失效的根因。**声明了却没接线的状态字段，比没有更危险**——它会让人以为功能已经实现。
+- **状态定义曾经有坑（已修）**：`agent/state.py` 的 `State` 是 `TypedDict`，早期 `messages: list` **没有 reducer**，输入会整字段覆盖 checkpoint 里的历史——结果是用着 checkpointer 却只支持单轮。现在挂的是 `Annotated[list[AnyMessage], add_messages]`，节点只返回本轮新增消息。
+- **`State.needs_calc` 曾经是死字段（已删除）**：声明了、注释写了"由 info_agent 设置"，但全项目**从未被读写**，实际判断改用了 `CALC_KEYWORDS` 字符串匹配——这正是 `calc` 支线失效的根因。**声明了却没接线的状态字段，比没有更危险**：它会让人以为功能已经实现。现在路由依据是"用户提问里的算术意图"（`agent/graph.py` 的 `looks_like_arithmetic`），字段本身已从 `State` 移除。
 - 取舍本质：图越复杂，`route_*` 这类纯函数的可测试性就越关键（好消息是它确实好测，输入 state 输出字符串）。
 - **什么时候不该用**：线性流程（取数 → 总结）用两行代码就够，上 StateGraph 是过度设计。
 
@@ -210,7 +218,7 @@ def read_file_mcp(path: str) -> str:
     return asyncio.run(call_read_file(path))
 ```
 
-真正的协议细节在 `mcp_servers/client.py`：`stdio_client` 启动 Server 子进程 → `ClientSession` → `session.initialize()` 握手 → `session.call_tool("read_file", {...})`，带 `CALL_TIMEOUT = 30.0`，并把所有异常**转成字符串返回而不是抛出**。Server 侧（`mcp_servers/file_server.py`）用 `ALLOWED_DIR` 做路径白名单。
+真正的协议细节在 `mcp_servers/client.py`：`stdio_client` 启动 Server 子进程 → `ClientSession` → `session.initialize()` 握手 → `session.call_tool("read_file", {...})`，带 `CALL_TIMEOUT = 30.0`，并把所有异常**转成字符串返回而不是抛出**。Server 侧（`mcp_servers/file_server.py`）用 `Path.resolve()` + `Path.is_relative_to()` 做路径白名单——**早期版本用字符串 `startswith` 前缀匹配，`../documents_evil/x` 这种共享前缀的越界读能直接过关**，现在由 `tests/test_file_server.py` 逐条回归。
 
 **取舍**
 
