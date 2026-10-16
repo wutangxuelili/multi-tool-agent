@@ -14,8 +14,10 @@ services:
 
   agent:
     build: .
-    # 先初始化数据库，然后保持运行等待 exec
-    command: sh -c "python scripts/inint_db.py && sleep infinity"
+    # 交互式一问一答（会提示 yes/no 确认敏感操作）：
+    #   docker compose run --rm agent
+    # 旧写法是 `sleep infinity` 保活等 `docker exec`，属于调试残留，已移除。
+    command: sh -c "python scripts/init_db.py && python main.py"
     depends_on:
       internal-api:
         condition: service_healthy
@@ -23,10 +25,17 @@ services:
       - .env
     environment:
       INTERNAL_API_BASE: http://internal-api:8001
+      # 运行时产物落在命名卷里，避免与宿主机目录属主（镜像内是非 root 用户）打架
+      DATA_DIR: /app/data
+      LOGS_DIR: /app/logs
     volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
-      - ./documents:/app/documents
+      - agent-data:/app/data
+      - agent-logs:/app/logs
+      # documents/ 只读挂载：file_server 只读它，白名单由 Server 侧强制
+      - ./documents:/app/documents:ro
     stdin_open: true
     tty: true
-    restart: unless-stopped
+
+volumes:
+  agent-data:
+  agent-logs:

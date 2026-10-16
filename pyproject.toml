@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-tool-agent"
+version = "0.2.0"
+description = "用 LangGraph 编排的多工具 AI 助手：MCP 文件读取 + 敏感操作的人工确认闸门"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["langgraph", "mcp", "agent", "llm", "human-in-the-loop"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+]
+
+# 直接依赖的唯一事实来源（版本下界 + 上界）。
+# 可复现安装请用锁文件 requirements.txt（含全部间接依赖的精确版本）。
+dependencies = [
+    "fastapi>=0.142,<1",
+    "langchain-core>=1.6,<2",
+    "langchain-openai>=1.6,<2",
+    "langgraph>=1.2,<2",
+    "langgraph-checkpoint-sqlite>=3.1,<4",
+    "mcp>=2.3,<3",
+    "pydantic>=2.13,<3",
+    "python-dotenv>=1.2,<2",
+    "requests>=2.34,<3",
+    "simpleeval>=1.0,<2",
+    "tavily-python>=0.8,<1",
+    "uvicorn>=0.54,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "ruff==0.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "历史版本文件", "data", "logs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "BLE", "PLW", "RUF"]
+ignore = [
+    # 中文全角标点（：，（）、× 等）在中文项目里是有意为之，不要"纠偏"
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # 行宽：中文注释按字符数天然偏长，交给 ruff format 兜底即可
+    "E501",
+    # 单例模式需要 global，属于有意写法
+    "PLW0603",
+]
+
+[tool.setuptools]
+packages = ["agent", "tools", "mcp_servers", "internal_api", "utils"]
+py-modules = ["main", "llm_client"]
+
+# 覆盖率只统计源码（不含 tests/ 与评测脚本），并跑一个不达标就失败的门槛
+[tool.coverage.run]
+source = [
+    "agent",
+    "tools",
+    "mcp_servers",
+    "internal_api",
+    "utils",
+    "main.py",
+    "llm_client.py",
+    "scripts",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

@@ -52,7 +52,7 @@ async def call_read_file(path: str) -> str:
                 texts = [item.text for item in result.content if hasattr(item, "text")]
                 return "\n".join(texts) if texts else "错误：无法解析返回内容。"
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return f"错误：调用工具超时（{CALL_TIMEOUT} 秒）。"
     except FileNotFoundError:
         return f"错误：找不到 Server 脚本 {SERVER_SCRIPT}。"
