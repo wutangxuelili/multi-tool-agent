@@ -4,7 +4,7 @@
 运行方式：uvicorn internal_api.server:app --port 8001
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 app = FastAPI(title="Company Internal API", version="0.1.0")
@@ -64,10 +64,13 @@ def health():
 
 
 @app.get("/announcements", response_model=AnnouncementList)
-def list_announcements(limit: int = 5, category: str | None = None):
+def list_announcements(
+    limit: int = Query(default=5, ge=1, le=20, description="最多返回几条，范围 1-20"),
+    category: str | None = Query(default=None, description="可选，按分类过滤"),
+):
     """列出公告。
 
-    :param limit: 最多返回几条，默认 5
+    :param limit: 最多返回几条，默认 5（超出 1-20 会被 FastAPI 直接拒绝为 422）
     :param category: 可选，按分类过滤
     """
     results = ANNOUNCEMENTS

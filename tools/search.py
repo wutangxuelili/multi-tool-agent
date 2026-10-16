@@ -7,6 +7,8 @@ from tavily import TavilyClient
 
 load_dotenv()
 
+DEFAULT_MAX_RESULTS = 3
+
 
 class SearchArgs(BaseModel):
     query: str = Field(min_length=1, description="搜索关键词，例如：Python 教程")
@@ -19,8 +21,21 @@ def get_search_client() -> TavilyClient:
     """返回 Tavily 搜索客户端单例。"""
     global _client
     if _client is None:
-        _client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        api_key = os.getenv("TAVILY_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "缺少 TAVILY_API_KEY：请复制 .env.example 为 .env 并填写。"
+            )
+        _client = TavilyClient(api_key=api_key)
     return _client
+
+
+def max_results() -> int:
+    """单次返回的结果条数（可用 SEARCH_MAX_RESULTS 覆盖）。"""
+    try:
+        return max(1, int(os.getenv("SEARCH_MAX_RESULTS", DEFAULT_MAX_RESULTS)))
+    except ValueError:
+        return DEFAULT_MAX_RESULTS
 
 
 @tool(args_schema=SearchArgs)
@@ -33,7 +48,10 @@ def search_web(query: str) -> str:
 
     try:
         client = get_search_client()
-        response = client.search(args.query, max_results=3)
+        response = client.search(args.query, max_results=max_results())
+    except RuntimeError as e:
+        # 缺配置属于"环境问题"，给出可操作提示而不是笼统的搜索失败
+        return f"搜索失败：{e}"
     except Exception as e:  # noqa: BLE001
         return f"搜索失败：{e}"
 

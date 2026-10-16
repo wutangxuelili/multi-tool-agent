@@ -2,17 +2,34 @@
 
 把 internal_api/server.py 提供的 HTTP 接口包装成 @tool，
 让 Agent 可以通过自然语言调用公司内部系统。
+
+注：base url 与超时都在**调用时**读取环境变量（不再在 import 期固化），
+因此改 `.env` / 容器环境变量后无需重启进程；也顺带修掉了"本模块依赖
+其它模块顺手调用 load_dotenv"的隐式耦合。
 """
 
 import os
 
 import requests
+from dotenv import load_dotenv
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-# ---------- 配置 ----------
-INTERNAL_API_BASE = os.getenv("INTERNAL_API_BASE", "http://localhost:8001")
-REQUEST_TIMEOUT = 10  # 秒
+load_dotenv()
+
+DEFAULT_BASE_URL = "http://localhost:8001"
+DEFAULT_TIMEOUT = 10
+
+
+def base_url() -> str:
+    return os.getenv("INTERNAL_API_BASE", DEFAULT_BASE_URL)
+
+
+def request_timeout() -> int:
+    try:
+        return max(1, int(os.getenv("INTERNAL_API_TIMEOUT", DEFAULT_TIMEOUT)))
+    except ValueError:
+        return DEFAULT_TIMEOUT
 
 
 # ---------- 参数模型 ----------
@@ -42,18 +59,21 @@ def list_announcements(limit: int = 5, category: str | None = None) -> str:
     if category:
         params["category"] = category
 
+    api_base = base_url()
+    timeout = request_timeout()
+
     # 2. 发送请求
     try:
         resp = requests.get(
-            f"{INTERNAL_API_BASE}/announcements",
+            f"{api_base}/announcements",
             params=params,
-            timeout=REQUEST_TIMEOUT,
+            timeout=timeout,
         )
         resp.raise_for_status()
     except requests.exceptions.Timeout:
-        return f"错误：内部 API 请求超时（{REQUEST_TIMEOUT} 秒）。"
+        return f"错误：内部 API 请求超时（{timeout} 秒）。"
     except requests.exceptions.ConnectionError:
-        return f"错误：无法连接内部 API（{INTERNAL_API_BASE}）。请确认服务已启动。"
+        return f"错误：无法连接内部 API（{api_base}）。请确认服务已启动。"
     except requests.exceptions.HTTPError as e:
         return f"错误：内部 API 返回 {e.response.status_code}。"
     except requests.exceptions.RequestException as e:

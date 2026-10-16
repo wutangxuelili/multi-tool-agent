@@ -1,36 +1,21 @@
-import os
-import sqlite3
+"""兼容入口：`scripts/inint_db.py` → `scripts/init_db.py`。
 
-os.makedirs("data", exist_ok=True)
+文件名 "inint" 是历史拼写错误（正确是 "init"）。为了不破坏既有引用
+（README / CI / Docker / 历史脚本），这里保留一个转发入口，
+真正实现在 `scripts/init_db.py`。
+"""
 
-conn = sqlite3.connect("data/company.db")
-cursor = conn.cursor()
+import runpy
+import sys
+from pathlib import Path
 
-cursor.execute("DROP TABLE IF EXISTS employees")
-cursor.execute("""
-    CREATE TABLE employees (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        department TEXT NOT NULL,
-        salary INTEGER NOT NULL,
-        hire_date TEXT NOT NULL
-    )
-""")
-
-employees = [
-    ("张三", "技术部", 25000, "2021-03-15"),
-    ("李四", "技术部", 28000, "2020-07-01"),
-    ("王五", "市场部", 18000, "2022-01-10"),
-    ("赵六", "市场部", 22000, "2019-11-20"),
-    ("孙七", "人事部", 15000, "2023-05-08"),
-    ("周八", "技术部", 35000, "2018-09-01"),
-    ("吴九", "财务部", 20000, "2021-12-15"),
-]
-cursor.executemany(
-    "INSERT INTO employees (name, department, salary, hire_date) VALUES (?, ?, ?, ?)",
-    employees,
+print(
+    "[deprecated] scripts/inint_db.py 拼写有误，请改用 scripts/init_db.py"
+    "（本兼容入口将在下个版本移除）",
+    file=sys.stderr,
 )
 
-conn.commit()
-conn.close()
-print("数据库创建完成：data/company.db")
+runpy.run_path(
+    str(Path(__file__).resolve().parent / "init_db.py"),
+    run_name="__main__",
+)
